@@ -1,0 +1,165 @@
+<Project Sdk="Microsoft.Build.NoTargets/3.7.0">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ArtifactsDir>$(MSBuildThisFileDirectory)artifacts\</ArtifactsDir>
+
+    <!--
+      TFMs to stage per side. Both are currently uniform across all six store types
+      (RemoteFile.<Type>.Handlers.csproj targets net10.0 only; RemoteFile.<Type>.Client.csproj
+      multi-targets net8.0;net10.0) - update here if that ever changes per-project.
+    -->
+    <HandlersTargetFrameworks>net10.0</HandlersTargetFrameworks>
+    <ClientTargetFrameworks>net8.0;net10.0</ClientTargetFrameworks>
+
+    <!-- Extension-point folder names, per Keyfactor's plugin-loading convention. -->
+    <FactoryExtensionFolderName>Keyfactor.CertificateStoreTypes.Extensions.ICertificateStoreTypeDefinitionFactory</FactoryExtensionFolderName>
+    <MigrationHandlerExtensionFolderName>Keyfactor.CertificateStoreTypes.Extensions.ICertificateStoreMigrationHandler</MigrationHandlerExtensionFolderName>
+    <ClientExtensionFolderName>Keyfactor.Platform.IOrchestratorJobExtension</ClientExtensionFolderName>
+  </PropertyGroup>
+
+  <!--
+    One item per certificate store type, pairing its client extension project with its
+    server-side handler project. Add a line here whenever a new store type is onboarded.
+  -->
+  <ItemGroup>
+    <StoreTypePackage Include="RFDER">
+      <ClientProject>extension-packages\RFDER\RemoteFile.RFDER\RemoteFile.RFDER.Client.csproj</ClientProject>
+      <ServerProject>extension-packages\RFDER\RemoteFile.RFDER.Handlers\RemoteFile.RFDER.Handlers.csproj</ServerProject>
+    </StoreTypePackage>
+    <StoreTypePackage Include="RFJKS">
+      <ClientProject>extension-packages\RFJKS\RemoteFile.RFJKS\RemoteFile.RFJKS.Client.csproj</ClientProject>
+      <ServerProject>extension-packages\RFJKS\RemoteFile.RFJKS.Handlers\RemoteFile.RFJKS.Handlers.csproj</ServerProject>
+    </StoreTypePackage>
+    <StoreTypePackage Include="RFKDB">
+      <ClientProject>extension-packages\RFKDB\RemoteFile.RFKDB\RemoteFile.RFKDB.Client.csproj</ClientProject>
+      <ServerProject>extension-packages\RFKDB\RemoteFile.RFKDB.Handlers\RemoteFile.RFKDB.Handlers.csproj</ServerProject>
+    </StoreTypePackage>
+    <StoreTypePackage Include="RFORA">
+      <ClientProject>extension-packages\RFORA\RemoteFile.RFORA\RemoteFile.RFORA.Client.csproj</ClientProject>
+      <ServerProject>extension-packages\RFORA\RemoteFile.RFORA.Handlers\RemoteFile.RFORA.Handlers.csproj</ServerProject>
+    </StoreTypePackage>
+    <StoreTypePackage Include="RFPEM">
+      <ClientProject>extension-packages\RFPEM\RemoteFile.RFPEM\RemoteFile.RFPEM.Client.csproj</ClientProject>
+      <ServerProject>extension-packages\RFPEM\RemoteFile.RFPEM.Handlers\RemoteFile.RFPEM.Handlers.csproj</ServerProject>
+    </StoreTypePackage>
+    <StoreTypePackage Include="RFPkcs12">
+      <ClientProject>extension-packages\RFPkcs12\RemoteFile.RFPkcs12\RemoteFile.RFPkcs12.Client.csproj</ClientProject>
+      <ServerProject>extension-packages\RFPkcs12\RemoteFile.RFPkcs12.Handlers\RemoteFile.RFPkcs12.Handlers.csproj</ServerProject>
+    </StoreTypePackage>
+  </ItemGroup>
+
+  <!--
+    Deliberately NOT using <ProjectReference>, and deliberately NOT building the twelve
+    store-type projects from here. ProjectReference to a multi-targeted project makes MSBuild
+    negotiate a single TargetFramework via GetTargetFrameworks/GetTargetPath before it will
+    even build the reference - and that negotiation is incompatible with Microsoft.Build.NoTargets
+    under Visual Studio's build engine (MSB4057: "target GetTargetPath does not exist"), even
+    with ReferenceOutputAssembly=false.
+
+    Rather than sidestep that by forcing a Build from inside Package (which then re-builds
+    all twelve projects every time you package, redundant with whatever already built them),
+    Package assumes the solution was already built and fails fast with a clear message if a
+    given project's output is missing. Build then package, as two explicit steps:
+      dotnet build RemoteFile.sln
+      dotnet build RemoteFile.Packaging.proj -t:Package
+    (or run scripts/packaging/*/build-and-package.*)
+  -->
+
+  <!--
+    Not hooked to AfterTargets="Build" on purpose - packaging is an explicit, opt-in step,
+    run after the solution is built (see above).
+
+    Produces, per store type, artifacts\<StoreType>\ containing:
+      .metadata\                                                                  (empty)
+      Keyfactor.CertificateStoreTypes.Extensions.ICertificateStoreTypeDefinitionFactory\
+        .metadata\                                                                (empty)
+        <tfm>\  (one per Handlers TFM)  - handlers build output + manifest-factory.json as manifest.json
+      Keyfactor.CertificateStoreTypes.Extensions.ICertificateStoreMigrationHandler\
+        .metadata\                                                                (empty)
+        <tfm>\  (one per Handlers TFM)  - handlers build output + manifest-handler.json as manifest.json
+      Keyfactor.Platform.IOrchestratorJobExtension\
+        .metadata\                                                                (empty)
+        <tfm>\  (one per Client TFM)    - client build output (already includes its own manifest.json)
+  -->
+  <Target Name="Package">
+    <RemoveDir Directories="$(ArtifactsDir)" Condition="Exists('$(ArtifactsDir)')" />
+    <MakeDir Directories="$(ArtifactsDir)" />
+
+    <MSBuild Projects="$(MSBuildProjectFile)" Targets="PackageStoreType" Properties="StoreType=%(StoreTypePackage.Identity);ClientProject=%(StoreTypePackage.ClientProject);ServerProject=%(StoreTypePackage.ServerProject)" />
+  </Target>
+
+  <Target Name="PackageStoreType">
+    <PropertyGroup>
+      <_RootDir>$(ArtifactsDir)$(StoreType)\</_RootDir>
+    </PropertyGroup>
+
+    <RemoveDir Directories="$(_RootDir)" Condition="Exists('$(_RootDir)')" />
+    <MakeDir Directories="$(_RootDir).metadata" />
+
+    <ItemGroup>
+      <_HandlersTfm Include="$(HandlersTargetFrameworks)" />
+      <_ClientTfm Include="$(ClientTargetFrameworks)" />
+    </ItemGroup>
+
+    <MSBuild Projects="$(MSBuildProjectFile)" Targets="StageHandlersExtensionFolder"
+             Properties="StoreType=$(StoreType);ServerProject=$(ServerProject);ExtensionFolderName=$(FactoryExtensionFolderName);ManifestFileName=manifest-factory.json;Tfm=%(_HandlersTfm.Identity)" />
+
+    <MSBuild Projects="$(MSBuildProjectFile)" Targets="StageHandlersExtensionFolder"
+             Properties="StoreType=$(StoreType);ServerProject=$(ServerProject);ExtensionFolderName=$(MigrationHandlerExtensionFolderName);ManifestFileName=manifest-handler.json;Tfm=%(_HandlersTfm.Identity)" />
+
+    <MSBuild Projects="$(MSBuildProjectFile)" Targets="StageClientExtensionFolder"
+             Properties="StoreType=$(StoreType);ClientProject=$(ClientProject);ExtensionFolderName=$(ClientExtensionFolderName);Tfm=%(_ClientTfm.Identity)" />
+
+    <Message Importance="high" Text="Packaged $(_RootDir)" />
+  </Target>
+
+  <!--
+    Stages one <tfm> runtime folder under a handlers extension-point folder: the handlers
+    build output (assembly + copy-local dependencies, everything except the two manifest-*.json
+    source files) plus the one manifest relevant to this extension point, renamed to manifest.json.
+  -->
+  <Target Name="StageHandlersExtensionFolder">
+    <PropertyGroup>
+      <_ServerProjectDir>$([System.IO.Path]::GetDirectoryName('$(MSBuildThisFileDirectory)$(ServerProject)'))\</_ServerProjectDir>
+      <_ServerOutDir>$(_ServerProjectDir)bin\$(Configuration)\$(Tfm)\</_ServerOutDir>
+      <_ExtensionFolderDir>$(ArtifactsDir)$(StoreType)\$(ExtensionFolderName)\</_ExtensionFolderDir>
+      <_RuntimeDir>$(_ExtensionFolderDir)$(Tfm)\</_RuntimeDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_HandlersFiles Include="$(_ServerOutDir)**\*.*" Exclude="$(_ServerOutDir)manifest-factory.json;$(_ServerOutDir)manifest-handler.json" />
+    </ItemGroup>
+
+    <Error Condition="'@(_HandlersFiles)' == ''" Text="No build output found for $(StoreType) server project under $(_ServerOutDir). Build the solution before packaging." />
+    <Error Condition="!Exists('$(_ServerOutDir)$(ManifestFileName)')" Text="Expected $(_ServerOutDir)$(ManifestFileName) but it was not found." />
+
+    <MakeDir Directories="$(_ExtensionFolderDir).metadata" />
+    <Copy SourceFiles="@(_HandlersFiles)" DestinationFolder="$(_RuntimeDir)%(RecursiveDir)" />
+    <Copy SourceFiles="$(_ServerOutDir)$(ManifestFileName)" DestinationFiles="$(_RuntimeDir)manifest.json" />
+  </Target>
+
+  <!--
+    Stages one <tfm> runtime folder under the client extension-point folder: the client build
+    output as-is, which already contains its own manifest.json and config.json via
+    RemoteFile.<Type>.Client.csproj's CopyToOutputDirectory items.
+  -->
+  <Target Name="StageClientExtensionFolder">
+    <PropertyGroup>
+      <_ClientProjectDir>$([System.IO.Path]::GetDirectoryName('$(MSBuildThisFileDirectory)$(ClientProject)'))\</_ClientProjectDir>
+      <_ClientOutDir>$(_ClientProjectDir)bin\$(Configuration)\$(Tfm)\</_ClientOutDir>
+      <_ExtensionFolderDir>$(ArtifactsDir)$(StoreType)\$(ExtensionFolderName)\</_ExtensionFolderDir>
+      <_RuntimeDir>$(_ExtensionFolderDir)$(Tfm)\</_RuntimeDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_ClientFiles Include="$(_ClientOutDir)**\*.*" />
+    </ItemGroup>
+
+    <Error Condition="'@(_ClientFiles)' == ''" Text="No build output found for $(StoreType) client project under $(_ClientOutDir). Build the solution before packaging." />
+
+    <MakeDir Directories="$(_ExtensionFolderDir).metadata" />
+    <Copy SourceFiles="@(_ClientFiles)" DestinationFolder="$(_RuntimeDir)%(RecursiveDir)" />
+  </Target>
+
+</Project>

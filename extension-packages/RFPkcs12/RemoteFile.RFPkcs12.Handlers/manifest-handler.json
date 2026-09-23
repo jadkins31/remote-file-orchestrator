@@ -1,0 +1,10 @@
+{
+  "Extensions": {
+    "Keyfactor.Platform.ICertificateStoreTypeMigrationHandler.ICertificateStoreMigrationHandler": {
+      "Keyfactor.Internal.RFPkcs12.StoreMigrationHandler": {
+        "assemblypath": "RemoteFile.RFPkcs12.Handlers.dll",
+        "TypeFullName": "RemoteFileTypeHandlers.RFPkcs12.RFPkcs12CertificateStoreMigrationHandler"
+      }
+    }
+  }
+}

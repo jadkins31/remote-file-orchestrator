@@ -14,11 +14,17 @@
     <PackageReference Include="Keyfactor.PKI" />
     <PackageReference Include="Microsoft.PowerShell.SDK" />
     <PackageReference Include="SSH.NET" />
+  </ItemGroup>
 
-    <None Update="manifest.json">
+  <ItemGroup>
+    <Compile Include="..\..\..\RemoteFile\**\*.cs" Exclude="..\..\..\RemoteFile\bin\**;..\..\..\RemoteFile\obj\**" Link="%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\..\RemoteFile\config.json" Link="config.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="config.json">
+    <None Update="manifest.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
